@@ -1,6 +1,6 @@
 import random
 
-from config import (
+from options import (
     race_descriptions,
     object_options,
     accessory_options,

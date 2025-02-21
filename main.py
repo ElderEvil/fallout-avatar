@@ -1,32 +1,31 @@
-import os
 import uuid
+from datetime import datetime
 
 import requests
 import streamlit as st
-from dotenv import load_dotenv
 from openai import OpenAI
 
-from config import (
-    archetypes,
-    expression_options,
-    weapon_options,
-    headgear,
-    haircuts,
-    skin_tone_options,
-    body_type_options,
-    faction_options,
-    outfit_options,
-    object_options,
-    accessory_options,
-    pose_options,
-    background_options,
+from options import (
     FULLY_COVERING_HEADGEAR,
+    accessory_options,
+    archetypes,
+    background_options,
+    body_type_options,
+    expression_options,
+    faction_options,
+    haircuts,
+    headgear,
+    object_options,
+    outfit_options,
+    pose_options,
     races,
-    settings,
+    skin_tone_options,
+    weapon_options,
 )
 from minio_service import get_minio_client
+from config import settings
 from models import Character
-from utils import closest_color, build_prompt, prefill_character
+from utils import build_prompt, closest_color, prefill_character
 
 OPENAI_API_KEY = settings.OPENAI_API_KEY
 
@@ -36,14 +35,18 @@ if not OPENAI_API_KEY:
     st.stop()
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-minio_client = get_minio_client()
+
+
+@st.cache_resource
+def get_cached_minio_client():
+    return get_minio_client()
+
+
+minio_client = get_cached_minio_client()
 bucket_name = "fastapi-minio"  # Ensure this matches the MinIO config
 
 # 🎨 **Main Title**
 st.title("☢️ Fallout Avatar Generator")
-
-# 🧬 **Character Customization**
-st.markdown("## 🎨 Customize Your Character")
 
 # **Archetype Selection**
 archetype = st.selectbox(
@@ -260,7 +263,13 @@ with col1:
 with col2:
     if "refined_prompt" in st.session_state:
         st.markdown("#### ✨ Refined Prompt")
-        refined_prompt = st.text_area("Refined Prompt", st.session_state.refined_prompt, height=250, key="refined_prompt", disabled=True)
+        refined_prompt = st.text_area(
+            "Refined Prompt",
+            st.session_state.refined_prompt,
+            height=250,
+            key="refined_prompt",
+            disabled=True,
+        )
 
 
 # 🚀 **Generate Image with Refined Prompt**
@@ -277,7 +286,15 @@ if st.button("🎭 Generate Avatar with AI"):
         # Download generated image
         image_url = response.data[0].url
         image_data = requests.get(image_url).content
-        generated_filename = f"avatar_{character.race}_{character.gender}_{uuid.uuid4()}"
+
+        # Generate a readable timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Shorten UUID for uniqueness (first 8 characters)
+        short_uuid = str(uuid.uuid4())[:8]
+
+        # Construct the filename
+        generated_filename = f"{character.race}_{character.gender}_{character.outfit}_{timestamp}_{short_uuid}"
         image_filename = generated_filename + ".png"
         prompt_filename = generated_filename + "_prompt.txt"
 
@@ -293,7 +310,11 @@ if st.button("🎭 Generate Avatar with AI"):
             )
 
             # Display stored image
-            st.image(image_url, caption="Generated Avatar (Stored in MinIO)", use_container_width=True)
+            st.image(
+                image_url,
+                caption="Generated Avatar (Stored in MinIO)",
+                use_container_width=True,
+            )
 
         except Exception as e:
             st.error(f"Failed to upload to MinIO: {e}")
