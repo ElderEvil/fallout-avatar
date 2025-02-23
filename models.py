@@ -1,19 +1,26 @@
 from pydantic import BaseModel, Field
-from typing import Literal
+
+from options.factions import Faction
+from options.races import GhoulFeralness, SuperMutantMutation, SynthType, Race, Gender
+
+STATE_OF_BEING_TYPE = GhoulFeralness | SuperMutantMutation | SynthType
 
 
 class Character(BaseModel):
-    race: Literal["Human", "Ghoul", "Super Mutant", "Synth"]
-    gender: Literal["Male", "Female", "Other"]
+    race: Race
+    gender: Gender
     skin_tone: str
     body_type: str
-    age: int | None = Field(None, ge=18, le=80)
-    hair: str | None = None
+    age: int | None = Field(None, ge=18, le=80, description="Only for human")
+    state_of_being: STATE_OF_BEING_TYPE | None = Field(
+        None, description="For ghouls/supermutants/synths"
+    )
     headgear: str
-    expression: str
+    hair: str | None = None
     hair_color: str | None = None
+    expression: str
     beard: str | None = None
-    faction: str
+    faction: Faction
     outfit: str
     weapon: str
     object_held: str

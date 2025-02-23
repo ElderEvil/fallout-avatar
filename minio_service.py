@@ -1,6 +1,5 @@
 import io
 import json
-from functools import lru_cache
 
 from minio import Minio
 from minio.error import S3Error
@@ -16,7 +15,11 @@ PUBLIC_POLICY_TEMPLATE = {
         {
             "Effect": "Allow",
             "Principal": {"AWS": ["*"]},
-            "Action": ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketMultipartUploads"],
+            "Action": [
+                "s3:GetBucketLocation",
+                "s3:ListBucket",
+                "s3:ListBucketMultipartUploads",
+            ],
             "Resource": [],
         },
         {
@@ -85,12 +88,18 @@ class MinioService:
                 error_msg = f"Error setting bucket policy for {bucket_name}: {e}"
                 raise BucketNotFoundError(error_msg) from e
 
-    def upload_file(self, *, file_data: bytes, file_name: str, bucket_name: str | None = None) -> str:
+    def upload_file(
+        self, *, file_data: bytes, file_name: str, bucket_name: str | None = None
+    ) -> str:
         bucket_name = bucket_name or self.default_bucket_name
         self._ensure_bucket_exists(bucket_name)
         try:
             result = self.client.put_object(
-                bucket_name, file_name, io.BytesIO(file_data), length=len(file_data), content_type="image/png"
+                bucket_name,
+                file_name,
+                io.BytesIO(file_data),
+                length=len(file_data),
+                content_type="image/png",
             )
             return (
                 self.public_url(file_name=file_name, bucket_name=bucket_name)
@@ -100,7 +109,6 @@ class MinioService:
         except S3Error as e:
             error_msg = f"Error uploading file to MinIO: {e}"
             raise FileUploadError(error_msg) from e
-
 
     def download_file(self, *, file_name: str, bucket_name: str | None = None) -> bytes:
         bucket_name = bucket_name or self.default_bucket_name
@@ -117,6 +125,5 @@ class MinioService:
         return f"{settings.MINIO_HOST}:{settings.MINIO_CUSTOM_PORT}/{bucket_name}/{file_name}"
 
 
-@lru_cache
 def get_minio_client() -> MinioService:
     return MinioService()

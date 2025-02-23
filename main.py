@@ -5,27 +5,27 @@ import requests
 import streamlit as st
 from openai import OpenAI
 
-from options import (
-    FULLY_COVERING_HEADGEAR,
-    accessory_options,
-    archetypes,
-    background_options,
-    body_type_options,
-    expression_options,
-    faction_options,
-    haircuts,
-    headgear,
-    object_options,
-    outfit_options,
-    pose_options,
-    races,
-    skin_tone_options,
-    weapon_options,
-)
-from minio_service import get_minio_client
+from auth import authenticate_user
 from config import settings
+from minio_service import get_minio_client
 from models import Character
-from utils import build_prompt, closest_color, prefill_character
+from options.appearance import (
+    skin_tone_options,
+    body_type_options,
+    fully_covering_headgear,
+    haircuts,
+    expression_options,
+    headgear,
+    beard_options,
+)
+from options.factions import Faction, faction_restrictions
+from options.items import common_equipment, faction_equipment
+from options.presets import archetypes
+from options.races import Gender, Race, SynthType, GhoulFeralness, SuperMutantMutation
+from options.scenes import pose_options, background_options
+from utils import build_prompt, closest_color, prefill_character, get_random_hair_color
+
+authenticate_user()
 
 OPENAI_API_KEY = settings.OPENAI_API_KEY
 
@@ -42,13 +42,18 @@ def get_cached_minio_client():
     return get_minio_client()
 
 
-minio_client = get_cached_minio_client()
-bucket_name = "fastapi-minio"  # Ensure this matches the MinIO config
-
-# 🎨 **Main Title**
+# Main Title
 st.title("☢️ Fallout Avatar Generator")
 
-# **Archetype Selection**
+if "auth_token" in st.session_state:
+    st.success(f"Hello, {st.session_state['email']}! You are authenticated.")
+else:
+    st.warning("Please log in to access this content.")
+
+if "hair_color_hex" not in st.session_state:
+    st.session_state.hair_color_hex = None
+
+# Archetype Selection
 archetype = st.selectbox(
     "Select a Preset Archetype", ["Custom"] + list(archetypes.keys())
 )
@@ -58,161 +63,234 @@ if archetype != "Custom":
         st.session_state.selected_archetype = archetype
         character = prefill_character(archetype)
 
-        # Populate session state
-        st.session_state.race = character.race
-        st.session_state.gender = character.gender
-        st.session_state.skin_tone = character.skin_tone
-        st.session_state.body_type = character.body_type
-        st.session_state.faction = character.faction
-        st.session_state.outfit = character.outfit
-        st.session_state.weapon = character.weapon
-        st.session_state.headgear = character.headgear
-        st.session_state.hair = character.hair or "None"
-        st.session_state.hair_color = character.hair_color or "None"
-        st.session_state.beard = character.beard or "None"
-        st.session_state.age = character.age if character.age else 30  # Default age
+        # Populate session state with archetype defaults
+        for field in character.model_fields:
+            st.session_state[field] = getattr(character, field)
+
+        random_hair_color_hex = get_random_hair_color(st.session_state["race"])
+        st.session_state.hair_color_hex = random_hair_color_hex
+
 else:
     st.session_state.selected_archetype = None
 
-# **Character Details**
+
 with st.expander("🧬 Character Details", expanded=True):
     st.subheader("Basic Traits")
     col1, col2 = st.columns(2)
+
     with col1:
+        # **Race Selection**
         race = st.selectbox(
-            "Race", races, key="race", help="Choose a race for your character."
+            "Race",
+            list(Race),
+            key="race",
+            help="Select your character's race. This determines available factions, attributes, and mutations.",
         )
+
+        if race == Race.SYNTH:
+            gender_options = (
+                [Gender.OTHER]
+                if st.session_state.get("state_of_being") != SynthType.GEN_3
+                else list(Gender)
+            )
+        else:
+            gender_options = [Gender.MALE, Gender.FEMALE]
+
         gender = st.radio(
             "Gender",
-            ["Male", "Female", "Other"],
+            gender_options,
             horizontal=True,
             key="gender",
-            help="Select gender identity.",
+            help="Choose gender.\n"
+            "- **Humans & Gen 3 Synths:** Can be Male, Female, or Other.\n"
+            "- **Gen 2 & Gen 1 Synths:** Must be 'Other' due to synthetic construction.",
         )
+
     with col2:
+        # **Skin Tone & Body Type**
         skin_tone = st.selectbox(
             "Skin Tone",
             skin_tone_options[race],
             key="skin_tone",
-            help="Choose a skin tone.",
+            help="Choose a skin tone based on race.\n"
+            "- **Humans**: Natural skin tones.\n"
+            "- **Ghouls**: Necrotic and mottled skin.\n"
+            "- **Super Mutants**: Mutated greenish hues.\n"
+            "- **Synths**: May have synthetic or metallic skin.",
         )
+
         body_type = st.selectbox(
             "Body Type",
             body_type_options[race],
             key="body_type",
-            help="Choose a body type.",
+            help="Chose a body type that fits your character's race and role.\n"
+            "- **Humans & Synths**: Vary from slim to muscular.\n"
+            "- **Super Mutants**: Heavily built, ranging from strong to behemoth-sized.",
         )
 
-    if race == "Human":
+    # **State of Being / Age Handling**
+    if race == Race.HUMAN:
         age = st.slider(
             "Age",
             min_value=18,
             max_value=80,
             value=30,
             key="age",
-            help="Adjust the character's age.",
+            help="Set your character's age (18-80).\n"
+            "- **Only humans have an adjustable age.**\n"
+            "- Ghouls may be over 200 years old but do not track age.",
         )
+        state_of_being = None  # Humans don’t have this attribute
     else:
-        age = None
+        state_of_being_options = {
+            Race.GHOUL: list(GhoulFeralness),
+            Race.SUPER_MUTANT: list(SuperMutantMutation),
+            Race.SYNTH: list(SynthType),
+        }
 
-# 💇‍♂️ **Appearance & Facial Features**
+        state_of_being = st.selectbox(
+            "State of Being",
+            state_of_being_options[race],
+            key="state_of_being",
+            help="Defines the biological or synthetic condition of your character.\n"
+            "- **Ghouls**: May range from sane to fully feral.\n"
+            "- **Super Mutants**: Vary in mutation severity.\n"
+            "- **Synths**: Can appear human-like or fully robotic.",
+        )
+
+        age = None  # Non-humans don't have age
+
+# Appearance & Facial Features
 with st.expander("💇‍♂️ Appearance & Facial Features", expanded=False):
     st.subheader("Hair, Headgear & Face")
     col1, col2 = st.columns(2)
+
     with col1:
+        # Headgear Selection
         headgear = st.selectbox(
             "Headgear",
-            headgear[race],
+            headgear.get(race, ["None"]),  # Default to ["None"] if race isn't found
             key="headgear",
-            help="Choose a hat, helmet, or head accessory.",
+            help="Choose a **hat, helmet, or head accessory**. Some helmets fully cover the head, hiding hair.",
         )
-        if headgear in FULLY_COVERING_HEADGEAR:
-            hair = "None"
-            hair_color = "None"
-        else:
+
+        # Hair & Hair Color Logic
+        hair = None
+        hair_color = None
+        if headgear not in fully_covering_headgear:
             hair = st.selectbox(
-                "Hair", haircuts[race], key="hair", help="Select a hairstyle."
+                "Hair",
+                haircuts[race],
+                key="hair",
+                help="Select a hairstyle. **Only available for non-fully covered headgear.**",
             )
+
             hair_color_hex = st.color_picker(
-                "Hair Color", "#5A3825", help="Choose a hair color."
+                "Hair Color",
+                key="hair_color",
+                help="Pick a **hair color**. **Humans have natural shades, while Synths may have neon or artificial tones.**",
             )
-            hair_color = closest_color(hair_color_hex)
+            if not hair_color_hex.startswith("#"):
+                hair_color = hair_color_hex
+            else:
+                hair_color = closest_color(hair_color_hex)
+            st.write(f"Selected hair color name: {hair_color.title()}")
+
     with col2:
+        # Facial Expression Selection
         expression = st.selectbox(
             "Facial Expression",
             expression_options,
             key="expression",
-            help="Choose the character's expression.",
+            help="Choose your character's **facial expression**, from neutral to intense emotions.",
         )
-        if race == "Human" and gender in ["Male", "Other"]:
+
+        # Beard Selection (Only for specific cases)
+        beard = "None"
+        if race == Race.HUMAN and gender in [Gender.MALE, Gender.OTHER]:
             beard = st.selectbox(
                 "Beard",
-                ["None", "Light Stubble", "Goatee", "Moustache", "Full Beard"],
+                beard_options,
                 key="beard",
-                help="Choose a beard style.",
+                help="Choose a **beard style**. **Only available for male human characters.**",
             )
-        else:
-            beard = "None"
 
-# 👕 **Faction, Outfit, and Equipment**
 with st.expander("👕 Faction, Outfit & Equipment", expanded=False):
-    st.subheader("Dress & Gear")
-    col1, col2 = st.columns(2)
-    with col1:
-        faction = st.selectbox(
-            "Faction",
-            faction_options,
-            key="faction",
-            help="Select the character's faction.",
-        )
-    with col2:
-        outfit = st.selectbox(
-            "Outfit", outfit_options, key="outfit", help="Choose an outfit."
-        )
+    st.subheader("Faction & Affiliation")
 
+    # Get valid factions for the race
+    valid_factions = faction_restrictions.get(race, [Faction.NONE])
+    faction = st.selectbox(
+        "Faction",
+        valid_factions,
+        key="faction",
+        help="Select a faction. It affects which equipment and items are available to your character.",
+    )
+
+    # Get available equipment for the selected faction
+    available_equipment = {
+        category: common_equipment[category]
+        + faction_equipment[faction].get(category, [])
+        for category in common_equipment.keys()
+    }
+
+    # Create equipment selection columns
     col1, col2 = st.columns(2)
+
     with col1:
         weapon = st.selectbox(
             "Weapon",
-            weapon_options,
+            available_equipment["weapons"],
             key="weapon",
-            help="Select a weapon for the character.",
+            help="Choose a weapon for your character. Available options depend on selected faction.",
+        )
+        accessory = st.selectbox(
+            "Accessory",
+            available_equipment["accessories"],
+            key="accessory",
+            help="Select character accessories like badges, modifications or decorations.",
         )
     with col2:
+        outfit = st.selectbox(
+            "Outfit",
+            available_equipment["outfits"],
+            key="outfit",
+            help="Pick character's clothing or armor. Available options depend on selected faction.",
+        )
         object_held = st.selectbox(
-            "Object", object_options, key="object_held", help="Choose an item to hold."
+            "Object",
+            available_equipment["objects"],
+            key="object_held",
+            help="Choose an item your character is holding or interacting with.",
         )
 
-    accessory = st.selectbox(
-        "Accessory",
-        accessory_options,
-        key="accessory",
-        help="Choose an additional accessory.",
-    )
-
-# 🎭 **Scene & Action**
+# Scene & Action
 with st.expander("🎭 Scene & Action", expanded=False):
     st.subheader("Pose & Background")
     col1, col2 = st.columns(2)
     with col1:
         pose = st.selectbox(
-            "Pose", pose_options, key="pose", help="Choose a pose for your character."
+            "Pose",
+            pose_options,
+            key="pose",
+            help="Select character's stance and action in the scene.",
         )
     with col2:
         background = st.selectbox(
             "Background",
             background_options,
             key="background",
-            help="Select a background for the scene.",
+            help="Choose the environment or location for your character.",
         )
 
-# ✅ **Final Character Object**
+# Final Character Object
 character = Character(
     race=race,
     gender=gender,
     skin_tone=skin_tone,
     body_type=body_type,
     age=age,
+    state_of_being=state_of_being,
     faction=faction,
     outfit=outfit,
     headgear=headgear,
@@ -230,11 +308,11 @@ character = Character(
 st.session_state.character = character
 st.json(character.model_dump(), expanded=False)
 
-# 📝 **Generate Initial Prompt**
+# Generate Initial Prompt
 st.markdown("### 📝 Generated Prompt")
 initial_prompt = build_prompt(character)
 
-# 🧠 **Improve Prompt with GPT**
+# Improve Prompt with GPT
 if st.button("✨ Improve Prompt with AI"):
     with st.spinner("Refining prompt..."):
         refined_prompt = client.chat.completions.create(
@@ -253,12 +331,13 @@ if st.button("✨ Improve Prompt with AI"):
         )
         st.session_state.refined_prompt = refined_prompt.choices[0].message.content
 
-# 📝 **Display Initial & Refined Prompt in Two Columns**
+# Display Initial & Refined Prompt in Two Columns
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("#### 🔹 Initial Prompt")
     st.text_area("Initial Prompt", initial_prompt, height=250, key="initial_prompt")
+    refined_prompt = None
 
 with col2:
     if "refined_prompt" in st.session_state:
@@ -271,14 +350,13 @@ with col2:
             disabled=True,
         )
 
-
-# 🚀 **Generate Image with Refined Prompt**
+# Generate Image with Refined Prompt
 st.markdown("### 🎨 Generate Avatar")
 if st.button("🎭 Generate Avatar with AI"):
     with st.spinner("Generating avatar..."):
         response = client.images.generate(
             model="dall-e-3",
-            prompt=refined_prompt,
+            prompt=refined_prompt or initial_prompt,
             size="1024x1024",
             quality="standard",
             n=1,
@@ -297,6 +375,9 @@ if st.button("🎭 Generate Avatar with AI"):
         generated_filename = f"{character.race}_{character.gender}_{character.outfit}_{timestamp}_{short_uuid}"
         image_filename = generated_filename + ".png"
         prompt_filename = generated_filename + "_prompt.txt"
+
+        minio_client = get_cached_minio_client()
+        bucket_name = "fastapi-minio"
 
         # Upload to MinIO
         try:
