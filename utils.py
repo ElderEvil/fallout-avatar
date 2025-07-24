@@ -1,4 +1,6 @@
 import random
+import uuid
+from datetime import datetime
 
 from models import Character
 from options.appearance import (
@@ -156,7 +158,7 @@ def prefill_character(archetype_name: str) -> Character:
         else None
     )
 
-    expression = random.choice(expression_options)
+    expression = random.choice(list(expression_options))
 
     available_equipment = {
         category: common_equipment[category]
@@ -199,7 +201,7 @@ def build_prompt(character: Character) -> str:
 
     # Add race description if available
     prompt = (
-        f"**{character.race}:** {race_descriptions.get(character.race, '')}\n\n"
+        f"**{character.race}:** {race_descriptions[character.race]}\n\n"
         if character.race in race_descriptions
         else ""
     )
@@ -263,8 +265,9 @@ def build_prompt(character: Character) -> str:
         prompt += f" Appears to be around {character.age} years old."
 
     # Add facial expression if it's not neutral
-    if character.expression != "Neutral":
-        prompt += f" Facial expression is {character.expression.lower()}."
+    expression_text = expression_options.get(character.expression, "")
+    if expression_text:
+        prompt += f" Face is {expression_text}."
 
     # Extra details (weapon, accessory, objects)
     details = []
@@ -291,3 +294,14 @@ def build_prompt(character: Character) -> str:
     )
 
     return prompt
+
+
+def generate_filenames(character: Character) -> tuple[str, str]:
+    # Generate a readable timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Shorten UUID for uniqueness (first 8 characters)
+    short_uuid = str(uuid.uuid4())[:8]
+
+    base_filename = f"{character.race}_{character.gender}_{character.outfit}_{timestamp}_{short_uuid}"
+    return f"{base_filename}.png", f"{base_filename}_prompt.txt"

@@ -1,6 +1,3 @@
-import uuid
-from datetime import datetime
-
 import requests
 import streamlit as st
 from openai import OpenAI
@@ -23,18 +20,17 @@ from options.items import common_equipment, faction_equipment
 from options.presets import archetypes
 from options.races import Gender, Race, SynthType, GhoulFeralness, SuperMutantMutation
 from options.scenes import pose_options, background_options
-from utils import build_prompt, closest_color, prefill_character, get_random_hair_color
+from utils import (
+    build_prompt,
+    closest_color,
+    prefill_character,
+    get_random_hair_color,
+    generate_filenames,
+)
 
 authenticate_user()
 
-OPENAI_API_KEY = settings.OPENAI_API_KEY
-
-# Ensure API key is set
-if not OPENAI_API_KEY:
-    st.error("Missing OpenAI API key. Please set OPENAI_API_KEY in a .env file.")
-    st.stop()
-
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 @st.cache_resource
@@ -45,18 +41,14 @@ def get_cached_minio_client():
 # Main Title
 st.title("☢️ Fallout Avatar Generator")
 
-if "auth_token" in st.session_state:
-    st.success(f"Hello, {st.session_state['email']}! You are authenticated.")
-else:
-    st.warning("Please log in to access this content.")
-
 if "hair_color_hex" not in st.session_state:
     st.session_state.hair_color_hex = None
 
+if "refined_prompt" not in st.session_state:
+    st.session_state.refined_prompt = None
+
 # Archetype Selection
-archetype = st.selectbox(
-    "Select a Preset Archetype", ["Custom"] + list(archetypes.keys())
-)
+archetype = st.selectbox("Select a Preset Archetype", ["Custom"] + list(archetypes))
 
 if archetype != "Custom":
     if st.session_state.get("selected_archetype") != archetype:
@@ -67,11 +59,13 @@ if archetype != "Custom":
         for field in character.model_fields:
             st.session_state[field] = getattr(character, field)
 
-        random_hair_color_hex = get_random_hair_color(st.session_state["race"])
-        st.session_state.hair_color_hex = random_hair_color_hex
+        st.session_state["hair_color_hex"] = get_random_hair_color(
+            st.session_state["race"]
+        )
 
 else:
     st.session_state.selected_archetype = None
+    st.session_state.setdefault("hair_color_hex", None)
 
 
 with st.expander("🧬 Character Details", expanded=True):
@@ -87,14 +81,13 @@ with st.expander("🧬 Character Details", expanded=True):
             help="Select your character's race. This determines available factions, attributes, and mutations.",
         )
 
-        if race == Race.SYNTH:
-            gender_options = (
-                [Gender.OTHER]
-                if st.session_state.get("state_of_being") != SynthType.GEN_3
-                else list(Gender)
-            )
-        else:
-            gender_options = [Gender.MALE, Gender.FEMALE]
+        gender_options_map = {
+            Race.SYNTH: [Gender.OTHER]
+            if st.session_state.get("state_of_being") != SynthType.GEN_3
+            else list(Gender),
+            Race.HUMAN: [Gender.MALE, Gender.FEMALE],
+        }
+        gender_options = gender_options_map.get(race, [Gender.MALE, Gender.FEMALE])
 
         gender = st.radio(
             "Gender",
@@ -169,7 +162,7 @@ with st.expander("💇‍♂️ Appearance & Facial Features", expanded=False):
         # Headgear Selection
         headgear = st.selectbox(
             "Headgear",
-            headgear.get(race, ["None"]),  # Default to ["None"] if race isn't found
+            headgear.get(race, ["None"]),
             key="headgear",
             help="Choose a **hat, helmet, or head accessory**. Some helmets fully cover the head, hiding hair.",
         )
@@ -180,7 +173,7 @@ with st.expander("💇‍♂️ Appearance & Facial Features", expanded=False):
         if headgear not in fully_covering_headgear:
             hair = st.selectbox(
                 "Hair",
-                haircuts[race],
+                haircuts.get(race, ["None"]),
                 key="hair",
                 help="Select a hairstyle. **Only available for non-fully covered headgear.**",
             )
@@ -306,11 +299,22 @@ character = Character(
 )
 
 st.session_state.character = character
-st.json(character.model_dump(), expanded=False)
 
 # Generate Initial Prompt
 st.markdown("### 📝 Generated Prompt")
 initial_prompt = build_prompt(character)
+
+# Display Initial & Refined Prompt in Two Columns
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("#### 🔹 Initial Prompt")
+    st.text_area("Initial Prompt", initial_prompt, height=250, key="initial_prompt")
+    refined_prompt = None
+
+if "auth_token" not in st.session_state:
+    st.warning("Please log in to access this content.")
+    st.stop()
 
 # Improve Prompt with GPT
 if st.button("✨ Improve Prompt with AI"):
@@ -320,7 +324,11 @@ if st.button("✨ Improve Prompt with AI"):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a creative AI assistant improving a character description for an AI image generator.",
+                    "content": (
+                        "You are a creative AI assistant improving a character description for an AI image generator. "
+                        "Make the prompt more expressive and true to Fallout series lore while shortening it. "
+                        "Keep all key details but remove redundancy and excessive wording."
+                    )
                 },
                 {
                     "role": "user",
@@ -331,13 +339,6 @@ if st.button("✨ Improve Prompt with AI"):
         )
         st.session_state.refined_prompt = refined_prompt.choices[0].message.content
 
-# Display Initial & Refined Prompt in Two Columns
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("#### 🔹 Initial Prompt")
-    st.text_area("Initial Prompt", initial_prompt, height=250, key="initial_prompt")
-    refined_prompt = None
 
 with col2:
     if "refined_prompt" in st.session_state:
@@ -351,12 +352,16 @@ with col2:
         )
 
 # Generate Image with Refined Prompt
+if "refined_prompt" not in st.session_state or not st.session_state.refined_prompt:
+    st.warning("Please refine the prompt before generating an image.")
+    st.stop()
+
 st.markdown("### 🎨 Generate Avatar")
 if st.button("🎭 Generate Avatar with AI"):
     with st.spinner("Generating avatar..."):
         response = client.images.generate(
             model="dall-e-3",
-            prompt=refined_prompt or initial_prompt,
+            prompt=refined_prompt,
             size="1024x1024",
             quality="standard",
             n=1,
@@ -365,16 +370,8 @@ if st.button("🎭 Generate Avatar with AI"):
         image_url = response.data[0].url
         image_data = requests.get(image_url).content
 
-        # Generate a readable timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        # Shorten UUID for uniqueness (first 8 characters)
-        short_uuid = str(uuid.uuid4())[:8]
-
         # Construct the filename
-        generated_filename = f"{character.race}_{character.gender}_{character.outfit}_{timestamp}_{short_uuid}"
-        image_filename = generated_filename + ".png"
-        prompt_filename = generated_filename + "_prompt.txt"
+        image_filename, prompt_filename = generate_filenames(character)
 
         minio_client = get_cached_minio_client()
         bucket_name = "fastapi-minio"

@@ -166,33 +166,24 @@ body_type_options = {
     ],
 }
 
-expression_emojis = {
-    # Neutral
-    "Neutral": "😐",
-    # Positive Emotions
-    "Smiling": "😊",
-    "Laughing": "😂",
-    "Proud": "😎",
-    # Negative Emotions
-    "Sad": "😔",
-    "Angry": "😠",
-    "Frustrated": "😫",
-    # Fear & Surprise
-    "Shocked": "😲",
-    "Terrified": "😱",
-    # Confidence & Strength
-    "Determined": "💪",
-    "Heroic": "🦸",
-    "Stoic": "🗿",
-    # Suspicion & Doubt
-    "Skeptical": "🤔",
-    "Suspicious": "🤨",
-    # Confusion & Mixed Feelings
-    "Confused": "😕",
-    "Awkward": "😬",
-    # Social & Playful
-    "Mischievous": "😈",
-    "Flirty": "😉",
-}
 
-expression_options = [f"{text} {emoji}" for text, emoji in expression_emojis.items()]
+expression_options = {
+    "Neutral 😐": "with a calm, neutral expression, showing no strong emotions",
+    "Smiling 😊": "with a warm, friendly smile, radiating positivity",
+    "Laughing 😂": "laughing heartily, eyes squinting with joy",
+    "Proud 😎": "standing confidently, exuding self-assurance and pride",
+    "Sad 😔": "with a melancholic expression, eyes slightly downcast",
+    "Angry 😠": "with a furious glare, jaw clenched in anger",
+    "Frustrated 😫": "visibly frustrated, brows furrowed and lips pressed tightly",
+    "Shocked 😲": "with wide eyes and an open mouth, frozen in shock",
+    "Terrified 😱": "trembling, eyes wide with fear and panic",
+    "Determined 💪": "with a firm, resolute look, ready to face any challenge",
+    "Heroic 🦸": "standing tall, gaze sharp, radiating bravery and heroism",
+    "Stoic 🗿": "with a stone-cold, unreadable expression, unmoved by surroundings",
+    "Skeptical 🤔": "raising an eyebrow, lips pressed in skepticism",
+    "Suspicious 🤨": "narrowing eyes slightly, expression filled with doubt",
+    "Confused 😕": "with a puzzled look, eyebrows raised in uncertainty",
+    "Awkward 😬": "with a forced, uneasy smile, avoiding eye contact",
+    "Mischievous 😈": "grinning slyly, eyes gleaming with playful intent",
+    "Flirty 😉": "with a coy smile, eyes glimmering with playful charm",
+}
