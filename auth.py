@@ -1,7 +1,7 @@
 import requests
 import streamlit as st
 
-FASTAPI_URL = "http://elderevil.net:30008/api/v1"
+FASTAPI_URL = "https://fallout-api.evillab.tech/api/v1"
 
 
 # Function to log in with FastAPI
