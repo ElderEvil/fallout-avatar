@@ -6,7 +6,7 @@ FASTAPI_URL = "https://fallout-api.evillab.tech/api/v1"
 
 # Function to log in with FastAPI
 def authenticate(email, password):
-    url = f"{FASTAPI_URL}/login/access-token"
+    url = f"{FASTAPI_URL}/auth/login"
     data = {"grant_type": "password", "username": email, "password": password}
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     response = requests.post(url, data=data, headers=headers)
